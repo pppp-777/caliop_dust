@@ -19,7 +19,6 @@ get_ipython().magic('reset -sf')
 
 # import matplotlib.cm as cm
 import math
-
 import numpy as np
 import numpy.ma as ma
 import glob
@@ -33,6 +32,10 @@ from matplotlib import colors
 
 from pyhdf.HDF import *
 from pyhdf.V import *
+
+from osgeo import gdal
+from osgeo import gdal_array
+from osgeo import osr
 
 def readc(filename, datafield):
     hdf = SD(filename, SDC.READ)
@@ -100,9 +103,10 @@ def qc_aod(FILE_NAME):
         for j in range(0,b):
             goodCAD[i,j]=np.squeeze((CAD[i,j,0] < -20 or CAD[i,j,0] == CAD_fill) and 
                                     (CAD[i,j,1] < -20 or CAD[i,j,1] == CAD_fill))
-            # if ((ftype[i,j,0] == 3) or (ftype[i,j,1] == 3)):
-            # goodAerosol[i,j]= np.squeeze((subtype[i,j,0] == 2) or (subtype[i,j,1] == 2))
-            goodAerosol[i,j]= np.squeeze(((ftype[i,j,0] == 19) or (ftype[i,j,0] == 27)) or ((ftype[i,j,1] == 19) or (ftype[i,j,1] == 27)))
+            if ((ftype[i,j,0] == 19) or (ftype[i,j,0] == 27)) or ((ftype[i,j,1] == 19) or (ftype[i,j,1] == 27)):
+                goodAerosol[i,j]= np.squeeze(((subtype[i,j,0] == 2) or (subtype[i,j,0] == 5) or (subtype[i,j,0] == 7)) or 
+                                             ((subtype[i,j,1] == 2) or (subtype[i,j,1] == 5) or (subtype[i,j,1] == 7)))
+            # goodAerosol[i,j]= np.squeeze(((ftype[i,j,0] == 19) or (ftype[i,j,0] == 27)) or ((ftype[i,j,1] == 19) or (ftype[i,j,1] == 27)))
             goodExtQC[i,j] = np.squeeze((ext_QC[i,j,0] == 0 or ext_QC[i,j,0] == 1 or ext_QC[i,j,0] == 2 or ext_QC[i,j,0] == 16 or 
                                          ext_QC[i,j,0] == 18 or ext_QC[i,j,0] == ext_QCfill) and 
                                         (ext_QC[i,j,1] == 0 or ext_QC[i,j,1] == 1 or ext_QC[i,j,1] == 2 or ext_QC[i,j,1] == 16 or 
@@ -121,7 +125,7 @@ def qc_aod(FILE_NAME):
     useSamples[goodExtQC==0] = 0
     
     return useSamples, ext_coe
-    
+
 SDATE='199801'
 EDATE='201612'
 
@@ -147,78 +151,131 @@ aod_5dust_div[:] = 0
 fre_5dust_div = np.empty((len(lat_grid), len(lon_grid)))
 fre_5dust_div[:] = 0
 
-def griding(alt_g,lat_g,lon_g,ext_coe_g,l1,l2, aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div):
+alt_list=[[0,0.50],[0.51,1.00],[1.01,1.50],[1.51,2.00],[2.01,2.50],[2.51,3.00],[3.00,8.00]]
+
+for al in range(0,len(alt_list)): 
+    
+    def griding(alt_g,lat_g,lon_g,ext_coe_g,l1,l2, aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div):
+            
+        alt_id = np.fabs(np.array(alt_g) - l1)
+        alt_id1 = np.fabs(np.array(alt_g) - l2)
         
-    alt_id = np.fabs(np.array(alt_g) - l1)
-    alt_id1 = np.fabs(np.array(alt_g) - l2)
+        id0=np.unravel_index(alt_id.argmin(), alt_id.shape)
+        id00=np.unravel_index(alt_id1.argmin(), alt_id1.shape)
     
-    id0=np.unravel_index(alt_id.argmin(), alt_id.shape)
-    id00=np.unravel_index(alt_id1.argmin(), alt_id1.shape)
-
-    ext_coe_5 = ext_coe_g[:,id00[0]:id0[0]]
-    f5=len(ext_coe_5.T)
-    
-    ext_coe_5avg = np.nanmean(ext_coe_5, axis=1)
-    ext_coe_5avg = ext_coe_5avg*0.60
+        ext_coe_5 = ext_coe_g[:,id00[0]:id0[0]]
+        f5=len(ext_coe_5.T)
         
-    ext_coe_5fre=np.count_nonzero(~np.isnan(ext_coe_5), axis=1)/f5
+        ext_coe_5avg = np.nanmean(ext_coe_5, axis=1)
+        ext_coe_5avg = ext_coe_5avg*0.60
+            
+        ext_coe_5fre=np.count_nonzero(~np.isnan(ext_coe_5), axis=1)/f5
+        
+        for k1 in range(0,len(lat_g)):
+        
+            lat1=lat_g[k1,1]
+            lon1=lon_g[k1,1]
+        
+        # if ext_coe_avg[k1] != np.nan:
+            if math.isnan(ext_coe_5avg[k1])==False:
+                
+                lat_id = np.fabs(lat_grid  - lat1)
+                id1=np.unravel_index(lat_id.argmin(), lat_id.shape)
+                
+                lon_id = np.fabs(lon_grid  - lon1)
+                id2=np.unravel_index(lon_id.argmin(), lon_id.shape)
+                
+                sum_col = [aod_5dust[id1,id2],ext_coe_5avg[k1]]
+                
+                aod_5dust[id1,id2] = np.nansum(sum_col)
+                aod_5dust_div[id1,id2] =aod_5dust_div[id1,id2]+1
+                
+                fre_5col = [fre_5dust[id1,id2],ext_coe_5fre[k1]]
+                
+                fre_5dust[id1,id2] = np.nansum(fre_5col)
+                fre_5dust_div[id1,id2] =fre_5dust_div[id1,id2]+1
+             
+        return aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div
     
-    for k1 in range(0,len(lat_g)):
+    for h in range (0,(len(list_of_paths))):   
+        
+        FILE_NAME=list_of_paths[h]
+        
+        f = HDF(FILE_NAME, SDC.READ) 
+        vs = f.vstart()
+        vdata_lat = vs.attach('metadata')
+        m_data=vdata_lat[0]
+        alt=m_data[14]
+        vdata_lat.detach()
+        vs.end() 
+        f.close()
+        
+        FILE_NAME = list_of_paths[h]
+        useSamples, ext_coe = qc_aod(FILE_NAME)
+        
+        lat = readc(FILE_NAME,'Latitude')
+        lon = readc(FILE_NAME,'Longitude')
     
-        lat1=lat_g[k1,1]
-        lon1=lon_g[k1,1]
+        # aerosol_type = np.zeros_like(ftype)
+       
+        ext_coe[useSamples==0] = np.nan
+        
+        l1=alt_list[al][0]
+        l2=alt_list[al][1]
+        
+        aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div = griding(alt, lat, lon, ext_coe, l1, l2, aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div)
+        
+    aod_d=aod_5dust/aod_5dust_div
+    fre_d=fre_5dust/fre_5dust_div
     
-    # if ext_coe_avg[k1] != np.nan:
-        if math.isnan(ext_coe_5avg[k1])==False:
-            
-            lat_id = np.fabs(lat_grid  - lat1)
-            id1=np.unravel_index(lat_id.argmin(), lat_id.shape)
-            
-            lon_id = np.fabs(lon_grid  - lon1)
-            id2=np.unravel_index(lon_id.argmin(), lon_id.shape)
-            
-            sum_col = [aod_5dust[id1,id2],ext_coe_5avg[k1]]
-            
-            aod_5dust[id1,id2] = np.nansum(sum_col)
-            aod_5dust_div[id1,id2] =aod_5dust_div[id1,id2]+1
-            
-            fre_5col = [fre_5dust[id1,id2],ext_coe_5fre[k1]]
-            
-            fre_5dust[id1,id2] = np.nansum(fre_5col)
-            fre_5dust_div[id1,id2] =fre_5dust_div[id1,id2]+1
-         
-    return aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div
+    plt_var = [aod_d,fre_d]
+    
+    for p in range (0,len(plt_var)):
+        
+        array=plt_var[p]
+        
+        if p==0:
+           tif_name='aod_'+str(l1)+'_'+str(l2) 
+        else:
+           tif_name='fre_'+str(l1)+'_'+str(l2)  
+          
+        lon, lat = np.meshgrid(lon_grid, lat_grid)
+        
+        xmin,ymin,xmax,ymax = [lon.min(),lat.min(),lon.max(),lat.max()]
+        nrows,ncols = np.shape(array)
+        xres = (xmax-xmin)/float(ncols)
+        yres = (ymax-ymin)/float(nrows)
+        geotransform=(xmin,xres,0,ymax,0, -yres)   
+        # That's (top left x, w-e pixel resolution, rotation (0 if North is up), 
+        #         top left y, rotation (0 if North is up), n-s pixel resolution)
+        # I don't know why rotation is in twice???
+        
+        output_raster = gdal.GetDriverByName('GTiff').Create(tif_name,ncols, nrows, 1 ,gdal.GDT_Float64)  # Open the file
+        output_raster.SetGeoTransform(geotransform)  # Specify its coordinates
+        srs = osr.SpatialReference()                 # Establish its coordinate encoding
+        srs.ImportFromEPSG(4326)                     # This one specifies WGS84 lat long.
+                                                     # Anyone know how to specify the 
+                                                     # IAU2000:49900 Mars encoding?
+        output_raster.SetProjection( srs.ExportToWkt() )   # Exports the coordinate system 
+                                                           # to the file
+        output_raster.GetRasterBand(1).WriteArray(array)   # Writes my array to the raster
+        
+        output_raster.FlushCache()
+        output_raster = None
 
-for h in range (0,(len(list_of_paths))):
-    
-    FILE_NAME=list_of_paths[h]
-    
-    f = HDF(FILE_NAME, SDC.READ) 
-    vs = f.vstart()
-    vdata_lat = vs.attach('metadata')
-    m_data=vdata_lat[0]
-    alt=m_data[14]
-    vdata_lat.detach()
-    vs.end() 
-    f.close()
-    
-    FILE_NAME = list_of_paths[h]
-    useSamples, ext_coe = qc_aod(FILE_NAME)
-    
-    lat = readc(FILE_NAME,'Latitude')
-    lon = readc(FILE_NAME,'Longitude')
+        from IPython import get_ipython
+        get_ipython().magic('reset -sf')
 
-    # aerosol_type = np.zeros_like(ftype)
-   
-    ext_coe[useSamples==0] = np.nan
-    
-    l1=0
-    l2=8
-    
-    aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div = griding(alt, lat, lon, ext_coe, l1, l2, aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div)
-    
-aod_d=aod_5dust/aod_5dust_div
-fre_d=fre_5dust/fre_5dust_div
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -247,53 +304,50 @@ fre_d=fre_5dust/fre_5dust_div
 # dst_dataset = None
 
 
-from osgeo import gdal
-from osgeo import gdal_array
-from osgeo import osr
 
-array=aod_d
-lon, lat = np.meshgrid(lon_grid, lat_grid)
-# array = np.array(( (0.1, 0.2, 0.3, 0.4),
-#                    (0.2, 0.3, 0.4, 0.5),
-#                    (0.3, 0.4, 0.5, 0.6),
-#                    (0.4, 0.5, 0.6, 0.7),
-#                    (0.5, 0.6, 0.7, 0.8) ))
-# # My image array      
-# lat = np.array(( (10.0, 10.0, 10.0, 10.0),
-#                  ( 9.5,  9.5,  9.5,  9.5),
-#                  ( 9.0,  9.0,  9.0,  9.0),
-#                  ( 8.5,  8.5,  8.5,  8.5),
-#                  ( 8.0,  8.0,  8.0,  8.0) ))
-# lon = np.array(( (20.0, 20.5, 21.0, 21.5),
-#                  (20.0, 20.5, 21.0, 21.5),
-#                  (20.0, 20.5, 21.0, 21.5),
-#                  (20.0, 20.5, 21.0, 21.5),
-#                  (20.0, 20.5, 21.0, 21.5) ))
-# For each pixel I know it's latitude and longitude.
-# As you'll see below you only really need the coordinates of
-# one corner, and the resolution of the file.
+# array=aod_d
+# lon, lat = np.meshgrid(lon_grid, lat_grid)
+# # array = np.array(( (0.1, 0.2, 0.3, 0.4),
+# #                    (0.2, 0.3, 0.4, 0.5),
+# #                    (0.3, 0.4, 0.5, 0.6),
+# #                    (0.4, 0.5, 0.6, 0.7),
+# #                    (0.5, 0.6, 0.7, 0.8) ))
+# # # My image array      
+# # lat = np.array(( (10.0, 10.0, 10.0, 10.0),
+# #                  ( 9.5,  9.5,  9.5,  9.5),
+# #                  ( 9.0,  9.0,  9.0,  9.0),
+# #                  ( 8.5,  8.5,  8.5,  8.5),
+# #                  ( 8.0,  8.0,  8.0,  8.0) ))
+# # lon = np.array(( (20.0, 20.5, 21.0, 21.5),
+# #                  (20.0, 20.5, 21.0, 21.5),
+# #                  (20.0, 20.5, 21.0, 21.5),
+# #                  (20.0, 20.5, 21.0, 21.5),
+# #                  (20.0, 20.5, 21.0, 21.5) ))
+# # For each pixel I know it's latitude and longitude.
+# # As you'll see below you only really need the coordinates of
+# # one corner, and the resolution of the file.
 
-xmin,ymin,xmax,ymax = [lon.min(),lat.min(),lon.max(),lat.max()]
-nrows,ncols = np.shape(array)
-xres = (xmax-xmin)/float(ncols)
-yres = (ymax-ymin)/float(nrows)
-geotransform=(xmin,xres,0,ymax,0, -yres)   
-# That's (top left x, w-e pixel resolution, rotation (0 if North is up), 
-#         top left y, rotation (0 if North is up), n-s pixel resolution)
-# I don't know why rotation is in twice???
+# xmin,ymin,xmax,ymax = [lon.min(),lat.min(),lon.max(),lat.max()]
+# nrows,ncols = np.shape(array)
+# xres = (xmax-xmin)/float(ncols)
+# yres = (ymax-ymin)/float(nrows)
+# geotransform=(xmin,xres,0,ymax,0, -yres)   
+# # That's (top left x, w-e pixel resolution, rotation (0 if North is up), 
+# #         top left y, rotation (0 if North is up), n-s pixel resolution)
+# # I don't know why rotation is in twice???
 
-output_raster = gdal.GetDriverByName('GTiff').Create('myraster1.tif',ncols, nrows, 1 ,gdal.GDT_Float64)  # Open the file
-output_raster.SetGeoTransform(geotransform)  # Specify its coordinates
-srs = osr.SpatialReference()                 # Establish its coordinate encoding
-srs.ImportFromEPSG(4326)                     # This one specifies WGS84 lat long.
-                                             # Anyone know how to specify the 
-                                             # IAU2000:49900 Mars encoding?
-output_raster.SetProjection( srs.ExportToWkt() )   # Exports the coordinate system 
-                                                   # to the file
-output_raster.GetRasterBand(1).WriteArray(array)   # Writes my array to the raster
+# output_raster = gdal.GetDriverByName('GTiff').Create('myraster1.tif',ncols, nrows, 1 ,gdal.GDT_Float64)  # Open the file
+# output_raster.SetGeoTransform(geotransform)  # Specify its coordinates
+# srs = osr.SpatialReference()                 # Establish its coordinate encoding
+# srs.ImportFromEPSG(4326)                     # This one specifies WGS84 lat long.
+#                                              # Anyone know how to specify the 
+#                                              # IAU2000:49900 Mars encoding?
+# output_raster.SetProjection( srs.ExportToWkt() )   # Exports the coordinate system 
+#                                                    # to the file
+# output_raster.GetRasterBand(1).WriteArray(array)   # Writes my array to the raster
 
-output_raster.FlushCache()
-output_raster = None
+# output_raster.FlushCache()
+# output_raster = None
 
 
 
