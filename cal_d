@@ -153,7 +153,7 @@ fre_5dust_div[:] = 0
 
 alt_list=[[0,0.50],[0.51,1.00],[1.01,1.50],[1.51,2.00],[2.01,2.50],[2.51,3.00],[3.00,8.00]]
 
-for al in range(0,1): 
+for al in range(0,len(alt_list)): 
     
     def griding(alt_g,lat_g,lon_g,ext_coe_g,l1,l2, aod_5dust, aod_5dust_div, fre_5dust, fre_5dust_div):
             
