@@ -263,8 +263,7 @@ for al in range(0,len(alt_list)):
         output_raster.FlushCache()
         output_raster = None
 
-        from IPython import get_ipython
-        get_ipython().magic('reset -sf')
+
 
 
 
